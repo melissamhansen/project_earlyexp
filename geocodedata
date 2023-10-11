@@ -1,0 +1,82 @@
+---
+title: "Merz Lab Geocode"
+output:
+  html_document:
+    df_print: paged
+#adapted from Kim Henry
+---
+
+# Install necessary packages
+
+This code chunk will need to be run once, later it can be commented out (change eval = TRUE to eval = FALSE in the code chunk).
+
+```{r, eval = TRUE}
+#install.packages(c("tidyverse", "tidycensus", "tigris"))
+
+```
+
+# Load necessary packages and set options
+
+```{r}
+
+library(tigris)
+library(tidyverse)
+
+options(tigris_use_cache = TRUE)
+
+```
+
+# Import data
+
+A datafile with the addresses is needed. In the project folder, I created an example file (called example.csv) that you can use as a template. 
+
+```{r}
+
+my_addresses <- read_csv("example.csv")
+
+my_addresses
+
+```
+
+# Geocode addresses
+
+You can obtain a geoid at various levels -- for example -- state, county, census tract, census block, census block group. The block group is the most micro level for which contextual data are readily available, so I will show an example of that. However, we can change the geography later if needed.
+
+```{r}
+
+geocoded_addresses <- 
+  my_addresses |> 
+  append_geoid(geoid_type = "block group") 
+
+geocoded_addresses
+
+```
+
+# Merge in contextual data
+
+I'll demonstrate how to merge the ADI data with the geocoded addresses here.
+
+## Import ADI data
+
+Note that geoid in the geocoded addresses (created at the block group level) correspond to the FIPS code in the ADI dataframe. To make merging easier, I create a copy of FIPS called geoid.
+
+```{r}
+
+ADI <- read_csv("US_2020_ADI_Census Block Group_v3.2.csv") |> 
+  mutate(geoid = FIPS)
+
+ADI |> head()
+
+```
+
+## Merge files 
+```{r}
+
+merged_df <- 
+  geocoded_addresses |> 
+  left_join(ADI, by = "geoid")
+
+write.csv(merged_df, 'ADI.csv')
+
+```
+In this example, the ADI ranking at the national level (ADI_NATRANK) for the address inputted is 27 (the national score ranges from 1 to 100 where a higher score indicates greater deprivation). 
