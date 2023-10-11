@@ -1,0 +1,358 @@
+---
+title: "MRI StudyCoding"
+output: html_notebook
+---
+
+launch packages
+```{r}
+library(tidyverse)
+library(psych)
+library(devtools)
+library(stringr)
+```
+
+Load Data
+```{r}
+#change the name of the file based on the most recently downloaded csv file 
+mridata <-read.csv('MRI_6_21_23_cleaned.csv')
+#attach(mridata)
+```
+
+Gender
+```{r}
+mridata <- mridata %>%
+  mutate(gender = recode(gender,
+    "1" = "1",
+    "2" = "2",
+    "1|6" = "1",
+    "2|6" = "2",
+    "3" = "3", 
+    "4" = "3", 
+    "5" = "3", 
+    "7" = "3",
+    "8" = "3",
+  ))
+
+view(mridata$gender)
+```
+
+
+CTQ coding 
+```{r}
+emo_abuse_items <- dplyr::select(mridata, CTQ_3, CTQ_8, CTQ_14, CTQ_18, CTQ_25) #emotional abuse
+phys_abuse_items <- dplyr::select(mridata, CTQ_9, CTQ_11, CTQ_12, CTQ_15, CTQ_17) #physical abuse
+sex_abuse_items <- dplyr::select(mridata, CTQ_20, CTQ_21, CTQ_23, CTQ_24, CTQ_27) #sexual abuse
+emo_neglect_items <- dplyr::select(mridata, CTQ_5, CTQ_7, CTQ_13, CTQ_19, CTQ_28) #emotional neglect
+phys_neglect_items <- dplyr::select(mridata, CTQ_1, CTQ_2, CTQ_4, CTQ_6, CTQ_26)  #physical neglect
+total_items <- dplyr::select(mridata, CTQ_1,CTQ_2,CTQ_3,	CTQ_4,CTQ_5,CTQ_6,CTQ_7, CTQ_8,	CTQ_9,	CTQ_10,	CTQ_11,	CTQ_12,	CTQ_13,	CTQ_14,	CTQ_15,	CTQ_16,	CTQ_17,	CTQ_18,	CTQ_19,	CTQ_20,	CTQ_21,	CTQ_22,	CTQ_23,	CTQ_24,	CTQ_25,	CTQ_26,	CTQ_27,	CTQ_28)
+denial_items <- dplyr::select(mridata, CTQ_10, CTQ_16, CTQ_22) #minimization/denial
+
+mridata <- mridata %>% mutate(
+    CTQ_emo_abuse = rowSums(emo_abuse_items),
+    CTQ_phys_abuse = rowSums(phys_abuse_items),
+    CTQ_sex_abuse = rowSums(sex_abuse_items),
+    CTQ_emo_neglect = rowSums(emo_neglect_items),
+    CTQ_phys_neglect = rowSums(phys_neglect_items),
+    CTQ_denial = rowSums(denial_items),
+    CTQ_total = rowSums(total_items))
+```
+
+
+PSS Coding 
+```{r}
+#0 - never 1 - almost never 2 - sometimes 3 - fairly often 4 - very often
+
+pss_items <- dplyr::select(mridata, PSS_1 ,PSS_2,PSS_3,	PSS_4, PSS_5, PSS_6, PSS_7,  PSS_8,	 PSS_9,	PSS_10,	PSS_11,	PSS_12,	PSS_13,	PSS_14)
+
+mridata <- mridata %>% dplyr::mutate(
+   pss_total = rowSums(pss_items))
+
+mridata <- mridata %>% mutate(
+   pss2 = rowSums(pss_items))
+
+mridata %>%
+  mutate(pss2 = case_when(
+    mridata$pss2 >= 0 & mridata$pss2 <= 18 ~ 1,
+     mridata$pss2 >= 19 & mridata$pss2 <= 37 ~ 2,
+     mridata$pss2 >= 38 & mridata$pss2 <= 56 ~ 3))
+
+```
+
+```{r}
+AUDIT_items <- dplyr::select(mridata, AUDIT_1 ,AUDIT_2,AUDIT_3,	AUDIT_4, AUDIT_5, AUDIT_6, AUDIT_7,  AUDIT_8, AUDIT_9,	AUDIT_10)
+
+mridata <- mridata %>% mutate(
+   audit_total = rowSums(AUDIT_items))
+```
+
+BRIEF coding 
+```{r}
+
+inhibit_items <- dplyr::select(mridata,   BRIEF_A_5,    BRIEF_A_16,    BRIEF_A_29,    BRIEF_A_36,    BRIEF_A_43,    BRIEF_A_55,    BRIEF_A_58,    BRIEF_A_73) 
+selfmonitor_items <- dplyr::select(mridata,   BRIEF_A_13,   BRIEF_A_23,   BRIEF_A_37,   BRIEF_A_50,   BRIEF_A_64,   BRIEF_A_70) 
+planorg_items <- dplyr::select(mridata,    BRIEF_A_9,   BRIEF_A_15,   BRIEF_A_21,   BRIEF_A_34,   BRIEF_A_39,   BRIEF_A_47,   BRIEF_A_54,   BRIEF_A_63,   BRIEF_A_66,   BRIEF_A_71) 
+shift_items <- dplyr::select(mridata,   BRIEF_A_8,   BRIEF_A_22,   BRIEF_A_32,   BRIEF_A_44,   BRIEF_A_61,   BRIEF_A_67) 
+initiate_items <- dplyr::select(mridata,   BRIEF_A_6,    BRIEF_A_14,    BRIEF_A_20,    BRIEF_A_25,    BRIEF_A_45,    BRIEF_A_49,    BRIEF_A_53,    BRIEF_A_62)
+taskmonitor_items <- dplyr::select(mridata,   BREIF_A_2,   BRIEF_A_18,   BRIEF_A_24,   BRIEF_A_41,   BRIEF_A_52,   BRIEF_A_75)
+emocontrol_items <- dplyr::select(mridata,   BRIEF_A_1,   BRIEF_A_12,   BRIEF_A_19,   BRIEF_A_28,   BRIEF_A_33,   BRIEF_A_42,   BRIEF_A_51,   BRIEF_A_57,   BRIEF_A_69,   BRIEF_A_72) 
+workingmem_items <- dplyr::select(mridata,   BRIEF_A_4,   BRIEF_A_11,   BRIEF_A_17,   BRIEF_A_26,   BRIEF_A_35,   BRIEF_A_46,   BRIEF_A_56,   BRIEF_A_68) 
+organizematerial_items <- dplyr::select(mridata,   BRIEF_A_3,   BRIEF_A_7,   BRIEF_A_30,   BRIEF_A_31,   BRIEF_A_40,   BRIEF_A_60,   BRIEF_A_65,   BRIEF_A_74)
+
+
+mridata <- mridata %>% mutate(
+    BRIEF_inhibit = rowSums(inhibit_items),
+    BRIEF_selfmon = rowSums(selfmonitor_items),
+    BRIEF_planorg = rowSums(planorg_items),
+    BRIEF_shift = rowSums(shift_items),
+    BRIEF_taskmon = rowSums(taskmonitor_items),
+    BRIEF_initiate = rowSums(initiate_items),
+    BRIEF_emocon = rowSums(emocontrol_items),
+    BRIEF_workmem = rowSums(workingmem_items),
+    BRIEF_orgmat = rowSums(organizematerial_items))
+
+metalcog_items <- dplyr::select(mridata, BRIEF_A_6,    BRIEF_A_14,    BRIEF_A_20,    BRIEF_A_25,    BRIEF_A_45,    BRIEF_A_49,    BRIEF_A_53,    BRIEF_A_62, BRIEF_A_4,   BRIEF_A_11,   BRIEF_A_17,   BRIEF_A_26,   BRIEF_A_35,   BRIEF_A_46,   BRIEF_A_56,   BRIEF_A_68, BRIEF_A_9,   BRIEF_A_15,   BRIEF_A_21,   BRIEF_A_34,   BRIEF_A_39,   BRIEF_A_47,   BRIEF_A_54,   BRIEF_A_63,   BRIEF_A_66,   BRIEF_A_71, BREIF_A_2,   BRIEF_A_18,   BRIEF_A_24,   BRIEF_A_41,   BRIEF_A_52,   BRIEF_A_75, BRIEF_A_3,   BRIEF_A_7,   BRIEF_A_30,   BRIEF_A_31,   BRIEF_A_40,   BRIEF_A_60,   BRIEF_A_65,   BRIEF_A_74)
+
+behavreg_items <- dplyr::select(mridata, BRIEF_A_5,    BRIEF_A_16,    BRIEF_A_29,    BRIEF_A_36,    BRIEF_A_43,    BRIEF_A_55,    BRIEF_A_58,    BRIEF_A_73, BRIEF_A_8,   BRIEF_A_22,   BRIEF_A_32,   BRIEF_A_44,   BRIEF_A_61,   BRIEF_A_67, BRIEF_A_1,   BRIEF_A_12,   BRIEF_A_19,   BRIEF_A_28,   BRIEF_A_33,   BRIEF_A_42,   BRIEF_A_51,   BRIEF_A_57,   BRIEF_A_69,   BRIEF_A_72, BRIEF_A_13,   BRIEF_A_23,   BRIEF_A_37,   BRIEF_A_50,   BRIEF_A_64,   BRIEF_A_70)
+
+mridata <- mridata %>% mutate(
+    BRIEF_MI = rowSums(metalcog_items),
+    BRIEF_BRI = rowSums(behavreg_items))
+```
+
+PSQI scoring 
+```{r}
+#comp1_items <- dplyr::select(mridata,PSQI_9)
+#comp2_items
+```
+
+```{r}
+
+#average parental education 
+mridata$avged <- (pared1 + pared2) /2
+
+```
+
+PHQ
+```{r}
+PHQ_items <- dplyr::select(mridata, PHQ_1 ,PHQ_2,PHQ_3,	PHQ_4, PHQ_5, PHQ_6, PHQ_7,  PHQ_8,	 PHQ_9,	PHQ_10,	PHQ_11,	PHQ_12,	PHQ_13,	PHQ_14)
+
+mridata <- mridata %>% mutate(
+   PHQ_total = rowSums(PHQ_items))
+```
+
+
+```{r}
+mridata <- mridata %>%
+  mutate(
+    PHQ_1b = ifelse(PHQ_1 == 1, 0, ifelse(PHQ_1 %in% c(2, 3, 4), 1, 2)),
+    PHQ_2b = ifelse(PHQ_2 == 1, 0, ifelse(PHQ_2 %in% c(2, 3, 4), 1, 2)),
+    PHQ_3b = ifelse(PHQ_3 == 1, 0, ifelse(PHQ_3 %in% c(2, 3, 4), 1, 2)),
+    PHQ_4b = ifelse(PHQ_4 == 1, 0, ifelse(PHQ_4 %in% c(2, 3, 4), 1, 2)),
+    PHQ_5b = ifelse(PHQ_5 == 1, 0, ifelse(PHQ_5 %in% c(2, 3, 4), 1, 2)),
+    PHQ_6b = ifelse(PHQ_6 == 1, 0, ifelse(PHQ_6 %in% c(2, 3, 4), 1, 2)),
+    PHQ_7b = ifelse(PHQ_7 == 1, 0, ifelse(PHQ_7 %in% c(2, 3, 4), 1, 2)),
+    PHQ_8b = ifelse(PHQ_8 == 1, 0, ifelse(PHQ_8 %in% c(2, 3, 4), 1, 2)),
+    PHQ_9b = ifelse(PHQ_9 == 1, 0, ifelse(PHQ_9 %in% c(2, 3, 4), 1, 2)),
+    PHQ_10b = ifelse(PHQ_10 == 1, 0, ifelse(PHQ_10 %in% c(2, 3, 4), 1, 2)),
+    PHQ_11b = ifelse(PHQ_11 == 1, 0, ifelse(PHQ_11 %in% c(2, 3, 4), 1, 2)),
+    PHQ_12b = ifelse(PHQ_12 == 1, 0, ifelse(PHQ_12 %in% c(2, 3, 4), 1, 2)),
+    PHQ_13b = ifelse(PHQ_13 == 1, 0, ifelse(PHQ_13 %in% c(2, 3, 4), 1, 2)),
+    PHQ_14b = ifelse(PHQ_14 == 1, 0, ifelse(PHQ_14 %in% c(2, 3, 4), 1, 2))
+  )
+
+
+PHQ2_items <- dplyr::select(mridata, PHQ_1b ,PHQ_2b,PHQ_3b,	PHQ_4b, PHQ_5b, PHQ_6b, PHQ_7b,  PHQ_8b,	 PHQ_9b,	PHQ_10b,	PHQ_11b,	PHQ_12b,	PHQ_13b,	PHQ_14b)
+
+mridata <- mridata %>% mutate(
+   PHQ_recode = rowSums(PHQ2_items))
+
+```
+
+```{r}
+mridata$home1 <- 0
+mridata$home1<-ifelse(mridata$child_homeown_1=="1",1,0)
+
+mridata$home2 <- 0
+mridata$home2<-ifelse(mridata$child_homeown_2=="1",1,0)
+
+mridata$home3 <- 0
+mridata$home3<-ifelse(mridata$child_homeown_3=="1",1,0)
+
+mridata$home4 <- 0
+mridata$home4<-ifelse(mridata$child_homeown_4=="1",1,0)
+
+mridata$home5 <- 0
+mridata$home5<-ifelse(mridata$child_homeown_5=="1",1,0)
+
+mridata$home6 <- 0
+mridata$home6<-ifelse(mridata$child_homeown_6=="1",1,0)
+
+mridata$home7 <- 0
+mridata$home7<-ifelse(mridata$child_homeown_7=="1",1,0)
+
+mridata$home8 <- 0
+mridata$home8<-ifelse(mridata$child_homeown_8=="1",1,0)
+
+mridata$home9 <- 0
+mridata$home9<-ifelse(mridata$child_homeown_9=="1",1,0)
+
+mridata$home10 <- 0
+mridata$home10<-ifelse(mridata$child_homeown_10=="1",1,0)
+
+mridata$home11 <- 0
+mridata$home11<-ifelse(mridata$child_homeown_11=="1",1,0)
+
+mridata$home12 <- 0
+mridata$home12<-ifelse(mridata$child_homeown_12=="1",1,0)
+
+mridata$home13 <- 0
+mridata$home13<-ifelse(mridata$child_homeown_13=="1",1,0)
+
+mridata$home14 <- 0
+mridata$home14<-ifelse(mridata$child_homeown_14=="1",1,0)
+
+mridata$home15 <- 0
+mridata$home15<-ifelse(mridata$child_homeown_15=="1",1,0)
+
+mridata$home16 <- 0
+mridata$home16<-ifelse(mridata$child_homeown_16=="1",1,0)
+
+mridata$home17 <- 0
+mridata$home17<-ifelse(mridata$child_homeown_17=="1",1,0)
+
+mridata$home18 <- 0
+mridata$home18<-ifelse(mridata$child_homeown_18=="1",1,0)
+
+yrsofhome_items <- dplyr::select(mridata, home1, home2, home3, home4, home5, home6, home7, home8, home9, home10, home11, home12, home13, home14, home15, home16, home17, home18)
+
+mridata <- mridata %>% mutate(
+    yrsofhome = rowSums(yrsofhome_items))
+```
+
+```{r}
+#need to fix the not sure option!!!
+
+mridata$assist1 <- 0
+mridata$assist1<-ifelse(mridata$pubassis1=="4",0,1)
+
+mridata$assist2 <- 0
+mridata$assist2<-ifelse(mridata$pubassis2=="4",0,1)
+
+mridata$assist3 <- 0
+mridata$assist3<-ifelse(mridata$pubassis3=="4",0,1)
+
+mridata$assist4 <- 0
+mridata$assist4<-ifelse(mridata$pubassis4=="4",0,1)
+
+mridata$assist5 <- 0
+mridata$assist5<-ifelse(mridata$pubassis5=="4",0,1)
+
+mridata$assist6 <- 0
+mridata$assist6<-ifelse(mridata$pubassis6=="4",0,1)
+
+mridata$assist7 <- 0
+mridata$assist7<-ifelse(mridata$pubassis7=="4",0,1)
+
+mridata$assist8 <- 0
+mridata$assist8<-ifelse(mridata$pubassis8=="4",0,1)
+
+mridata$assist9 <- 0
+mridata$assist9<-ifelse(mridata$pubassis9=="4",0,1)
+
+pubassist_items <- dplyr::select(mridata, assist1, assist2, assist4, assist5, assist6, assist7, assist8)
+
+mridata <- mridata %>% mutate(
+    pubassist = rowSums(pubassist_items))
+
+```
+
+
+```{r}
+mridata$redlunch <- 0
+mridata$redlunch <- ifelse(mridata$free_red_lunch=="1",1,0)
+
+```
+
+```{r}
+mridata$mathard1 <- 0
+mridata$mathard1 <- ifelse(mridata$MHDC_1=="1",1,0)
+
+mridata$mathard2 <- 0
+mridata$mathard2 <- ifelse(mridata$MHDC_2=="1",1,0)
+
+mridata$mathard3 <- 0
+mridata$mathard3 <- ifelse(mridata$MHDC_3=="1",1,0)
+
+mridata$mathard4 <- 0
+mridata$mathard4 <- ifelse(mridata$MHDC_4=="1",1,0)
+
+mridata$mathard5 <- 0
+mridata$mathard5 <- ifelse(mridata$MHDC_5=="1",1,0)
+
+mridata$mathard6 <- 0
+mridata$mathard6 <- ifelse(mridata$MHDC_6=="1",1,0)
+
+mridata$mathard7 <- 0
+mridata$mathard7 <- ifelse(mridata$MHDC_7=="1",1,0)
+
+mridata$mathard8 <- 0
+mridata$mathard8 <- ifelse(mridata$MHDC_8=="1",1,0)
+
+mathard_items <- dplyr::select(mridata, mathard1, mathard2, mathard4, mathard5, mathard6, mathard7, mathard8)
+
+mridata <- mridata %>% mutate(
+    mathard_total = rowSums(mathard_items))
+```
+
+```{r}
+ANXitems <- dplyr::select(mridata, EDANX_1, EDANX_2, EDANX_3,	EDANX_4,	EDANX_5, EDANX_6	, EDANX_7	, EDANX_8	, EDANX_9	, EDANX_10	, EDANX_11	,EDANX_12	,EDANX_13	,EDANX_14	,EDANX_15	,EDANX_16	,EDANX_17	,EDANX_18	,EDANX_19	,EDANX_20	,EDANX_21	,EDANX_22	,EDANX_23	,EDANX_24	,EDANX_25	,EDANX_26	,EDANX_27	,EDANX_28	,EDANX_29)
+
+mridata <- mridata %>% mutate(
+   total_anxiety = rowSums(ANXitems))
+```
+
+```{r}
+DEPitems <- dplyr::select(mridata, EDDEP_1, EDDEP_2, EDDEP_3,	EDDEP_4,	EDDEP_5, EDDEP_6	, EDDEP_7	, EDDEP_8	, EDDEP_9	, EDDEP_10	, EDDEP_11	,EDDEP_12	,EDDEP_13	,EDDEP_14	,EDDEP_15	,EDDEP_16	,EDDEP_17	,EDDEP_18	,EDDEP_19	,EDDEP_20	,EDDEP_21	,EDDEP_22	,EDDEP_23	,EDDEP_24	,EDDEP_25	,EDDEP_26	,EDDEP_27	,EDDEP_28)
+
+mridata <- mridata %>% mutate(
+   total_dep = rowSums(DEPitems))
+```
+
+```{r}
+ANGitems <- dplyr::select(mridata, EDANG_1, EDANG_2, EDANG_3,	EDANG_4,	EDANG_5, EDANG_6	, EDANG_7	, EDANG_8	, EDANG_9	, EDANG_10	, EDANG_11	,EDANG_12	,EDANG_13	,EDANG_14	,EDANG_15	,EDANG_16	,EDANG_17	,EDANG_18	,EDANG_19	,EDANG_20	,EDANG_21)
+
+mridata <- mridata %>% mutate(
+   total_anger = rowSums(ANGitems))
+```
+
+```{r}
+# Calculate the age difference in years
+data <- data %>%
+  mutate(ageyrs = as.numeric(difftime(Sys.Date(), DOB, units = "days")) / 365)
+
+# Display the resulting data frame
+head(data)
+
+
+
+# to calculate exact age manually
+#date_1 = as.Date("2003-10-04")
+#date_2 = as.Date("2023-03-22")
+#age = difftime(date_2,date_1, units = "days")
+#age
+```
+
+
+```{r}
+mridata <- dplyr::select(mridata, SID, avged, pubassist, redlunch, mathard_total, yrsofhome, pss_total, pss2, CTQ_emo_abuse, CTQ_phys_abuse, CTQ_sex_abuse, CTQ_emo_neglect,CTQ_phys_neglect, CTQ_denial,CTQ_total, total_anxiety, total_dep, total_anger, audit_total, BRIEF_inhibit, BRIEF_selfmon,BRIEF_planorg, BRIEF_shift, BRIEF_taskmon, BRIEF_initiate, BRIEF_emocon, BRIEF_workmem, BRIEF_orgmat, BRIEF_MI, BRIEF_BRI,PHQ_total )
+
+write.csv(mridata,'mridata_summeditems09_26_23.csv')
+```
+
+```{r}
+data <- read_csv("mridata_summeditems09_26_23.csv")
+corr1 <- cor.test(data$total_dep, data$PHQ_total, method = "pearson")
+print(corr1$estimate)
+print(corr1$p.value)
+```
+
