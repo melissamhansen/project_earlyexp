@@ -1,0 +1,133 @@
+#! /usr/bin/env python3
+
+import os
+import csv
+import sys
+import re
+
+################################################################################
+#
+#  This script:
+#
+#    1. Runs 3dDeconvolve.
+#    2. Esimtimtes blur (FWHM and ACF) from residual statistical maps.
+#
+################################################################################
+
+# Define project data directory
+proj_dir = "/data/earlyexp/data"
+
+# Define functional directory
+image = "fmri_flanker"
+
+# Store path to current working directory
+current_dir = os.getcwd()
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Prompt user for subject ID
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+if len(sys.argv) == 1:
+  subID = [input("\n\033[1m  Participant's ID number (e.g., MR001):"
+                 "\033[0m").rstrip()]
+elif sys.argv[1] == "batch":
+  print("\n    Running batch mode")
+  os.chdir("/data/earlyexp/data/")
+  subID=(((os.popen("ls -d MR*")).read()).rstrip()).split("\n")
+  os.chdir(current_dir)
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Delete existing files
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+for this_subID in subID:
+  sub_proc = "%s/%s/proc" % (proj_dir, this_subID)
+  os.system("rm -r %s/session/*_t1_un_ic.nii 2>/dev/null" %(sub_proc))
+  os.system("rm -r %s/session/*decon* 2>/dev/null" %(sub_proc))
+  os.system("rm -r %s/session/*residual* 2>/dev/null" %(sub_proc))
+  os.system("rm -r %s/session/*FWHM* 2>/dev/null" %(sub_proc))
+  os.system("rm -r %s/session/3dDeconvolve.err 2>/dev/null" %(sub_proc))
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Run GLM
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+# Loop over subjects
+for this_subID in subID:
+  print(this_subID)
+  sub_proc = "%s/%s/proc" % (proj_dir, this_subID)
+  sub_session = sub_proc+"/session"
+  # Copy over t1
+  os.system("cp %s/t1/%s_t1_un_ic.nii %s" %(sub_proc, this_subID, sub_session))
+  os.system("cp %s/t1/%s_t1_un_ic_at.nii %s" %(sub_proc, this_subID, sub_session))
+  if os.path.isfile("%s/%s/%s_%s_b0_despike_al_smth.nii" %(sub_proc, image, this_subID, image)):
+    # Open reg motion parameters file
+    vr_file = "%s/%s/%s_%s_b0_despike_vr_motion.1D" %(sub_proc, image, this_subID, image)
+    file = open("/data/earlyexp/data/behavioral/events/" + this_subID + '_events.tsv')
+    # Create events list
+    events_file = csv.reader(file)
+    events = []
+    for row in events_file:
+      events.append(row)
+
+    # Create lists of relevant parameters and combine into string for GLM function
+
+    # Get all unique values test_cond levels for this stubject
+    # This has to be pullted from the data because levels change for some subjects
+    test_cond_levels = []
+    for row in events:
+      tmp = row[events[0].index("test_cond")]
+      if(tmp != "n/a" and tmp != "test_cond"):
+        if tmp not in test_cond_levels:
+          test_cond_levels.append(tmp)
+    test_cond_levels.sort()
+
+    # Collect all onset times for each test_cond
+    onsets =  [[] for _ in range(len(test_cond_levels))]
+    for row in events:
+      tmp = row[events[0].index("test_cond")]
+      if (tmp != "n/a" and tmp != "test_cond"):
+        onsets[test_cond_levels.index(tmp)].append(row[events[0].index("onset")])
+    # Third, create stim_text that will be used in glm
+    stim_text = []
+    for i in range(0, len(test_cond_levels)):
+      stim_text.append("-stim_times " + str(i+7) + " '1D: " + ' '.join(onsets[i]) + "' 'BLOCK5(1,1)' -stim_label " + str(i+7) + " test_cond_" + test_cond_levels[i])
+
+os.system("3dDeconvolve \
+-jobs 32 \
+-overwrite \
+-input "+sub_proc+"/"+image+"/"+this_subID+"_"+image+"_b0_despike_al_smth.nii \
+-nfirst 0 \
+-noxsave \
+-xjpeg "+sub_session+"/"+this_subID+"_"+image+"_decon_events.jpg \
+-x1D "+sub_session+"/"+this_subID+"_"+image+"_decon_events.1D \
+-quiet \
+-noFDR \
+-fout \
+-rout \
+-tout \
+-vout \
+-bout \
+-full_first \
+-errts "+sub_session+"/"+this_subID+"_"+image+"_residual.nii \
+-bucket "+sub_session+"/"+this_subID+"_"+image+"_decon.nii \
+-local_times \
+-GOFORIT 0 \
+-polort A \
+-num_stimts "+ str(6 + len(test_cond_levels)) +" \
+-stim_file 1 "+vr_file+"\"[0]\" -stim_base 1 -stim_label 1 roll \
+-stim_file 2 "+vr_file+"\"[1]\" -stim_base 2 -stim_label 2 pitch \
+-stim_file 3 "+vr_file+"\"[2]\" -stim_base 3 -stim_label 3 yaw \
+-stim_file 4 "+vr_file+"\"[3]\" -stim_base 4 -stim_label 4 ds \
+-stim_file 5 "+vr_file+"\"[4]\" -stim_base 5 -stim_label 5 dl \
+-stim_file 6 "+vr_file+"\"[5]\" -stim_base 6 -stim_label 6 dp " \
++ " ".join(stim_text) \
+)
+
+#Estimate smoothness using residual statistical maps
+os.system("3dFWHMx -automask -detrend -acf %s/session/%s_%s_residual_acf.1D -input %s/session/%s_%s_residual.nii -out %s/session/%s_%s_residual_estSmooth.txt > %s/session/%s_%s_mean_residual_estSmooth.txt" %(sub_proc, this_subID, image, sub_proc, this_subID, image, sub_proc, this_subID, image, sub_proc, this_subID, image))
+#The 3dFWHMx function names plots oddly, so fix
+os.system("mv %s/session/%s_%s_residual_acf.1D.png %s/session/%s_%s_residual_acf.png" %(sub_proc, this_subID, image, sub_proc, this_subID, image))
+
+# End of script
+print("\033[1m  Script Finished\n\033[0m")
