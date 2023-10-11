@@ -1,0 +1,544 @@
+#! /usr/bin/env python3
+
+import os
+import sys
+import time
+import re
+
+################################################################################
+#
+#  This script:
+#
+#     1. Skull-strips and register's (talairach's) the anatomical volume.
+#     2. Fieldmap corrects and despikes the functional timeseries.
+#     3. Uses align_epi_anat to co-register and align the functional data to the
+#        anatomical image in one resampling step.
+#     3. Creates outlier and censor files for functional data.
+#     4. Smooths the functional data.
+#     5. Temporal filters fmri data.
+#     6. Identifies ICA noise componetns for functional data.
+#     7. eddy corrects DWI data
+#     8. Estimates DTI maps
+#
+#  Notes:addapted from Michael Thomas (original author)
+#
+################################################################################
+
+# Define project data directory
+proj_dir = "/data/earlyexp/data"
+
+# Structural directories
+struc_dirs = ["t1"]
+
+# Functional directories
+func_dirs = ["fmri_flanker", "fmri_rest"]
+
+# DTI directories
+dti_dirs = ["dti"]
+
+# Store path to current working directory
+current_dir = os.getcwd()
+
+# Prompt user for subject ID
+subID=input("\n\033[1m  Participant's ID (e.g., EE0001):\033[0m").rstrip()
+
+# Define paths to tar and raw
+sub_proc = "%s/%s/proc" % (proj_dir, subID)
+
+# Which fieldmap type for fMRI
+fieldmap_type = 'ge' # ge vs. se
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Process Structural
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+# Loop through structural images
+for image in struc_dirs:
+  process_struc = input(
+    "\033[1m  Process \033[91m%s\033[0m\033[1m? (y/n):\033[0m" %image).rstrip()
+  if((process_struc == 'y') | (process_struc == 'Y')):
+    # Check if structural file exists in proc directory
+    if(os.path.isfile("%s/%s/%s_%s.nii" %(sub_proc, image, subID, image)) != True):
+      sys.exit((
+      "  \033[91mERROR: %s/%s/%s_%s.nii header does not exist.\033[0m\n"
+      %(sub_proc, image, subID, image)))
+    # Fix non-uniform intesity (i.e., remove shading artifact)
+    print("\n    ...uni-fizing")
+    os.system("3dUnifize \
+              -input %s/%s/%s_%s.nii \
+              -prefix %s/%s/%s_%s_un.nii "
+              %(sub_proc, image, subID, image, sub_proc, image, subID, image))
+    # Auto skull-strip
+    skull_stripped = "n"
+    push_to_edge = ""
+    avoid_eyes = ""
+    no_avoid_eyes = ""
+    shrinkFac = 0.6
+    while ((skull_stripped == 'n') | (skull_stripped == 'N')):
+      print("\n    ...skull stripping")
+      os.system("3dSkullStrip \
+                -input %s/%s/%s_%s_un.nii \
+                -prefix %s/%s/%s_%s_un_ic.nii \
+                -shrink_fac %s \
+                %s %s %s"
+                %(sub_proc, image, subID, image, sub_proc, image, subID, image,
+                push_to_edge, avoid_eyes, no_avoid_eyes, shrinkFac))
+      print("\n\
+      View the skull-stripped image to determine whether it is acceptable.   \n\
+      Overlay the skull-stripped image on top of the raw image. If the skull \n\
+      stripping is poor, try again with different options.                   \n\
+      ")
+      view_skstp = input(
+        "\n\033[1m  Do you wish to view the skull-stripped image? (y/n):\033[0m"
+        ).rstrip()
+      if((view_skstp == 'y') | (view_skstp == 'Y')):
+        os.system("/usr/NX/scripts/vgl/vglrun afni -no_detach %s/%s/"
+                  %(sub_proc, image))
+      skull_strip_okay = input(
+        "\n\033[1m  Finished auto skull stripping? (y/n):\033[0m").rstrip()
+      if ((skull_strip_okay == 'y') | (skull_strip_okay == 'Y')):
+          skull_stripped = "y"
+          print("\n    Auto skull-stripping finished.")
+      else:
+        print("\n    Previous skull stripping files deleted.")
+        os.system("rm %s/%s/%s_%s_un_ic*" %(sub_proc, image, subID, image))
+        changeOptions = input(
+          "\n\033[1m  Would you like to change the 3dSkullStrip options? (y/n):"
+          "\033[0m").rstrip()
+        if((changeOptions == 'y') | (changeOptions == 'Y')):
+          # Note, even though many of these are defaults, adding them again
+          # increases the aggressiveness of the algorithms.
+          push_to_edgeResponse = input(
+            "\033[1m  Would you like to add the push_to_edge option? (y/n):"
+            "\033[0m").rstrip()
+          avoid_eyesResponse = input(
+            "\033[1m  Would you like to add the avoid_eyes option? (y/n):"
+            "\033[0m").rstrip()
+          no_avoid_eyesResponse = input(
+            "\033[1m  Would you like to add the no_avoid_eyes option? (y/n):"
+            "\033[0m").rstrip()
+          shrinkFac = input(
+            "\033[1m  Shrink factor (default = 0.6; decrease for clipping, "
+            "increase for leaving)? (numeric):\033[0m").rstrip()
+    # Create a binary (0/1) mask of the intra-cranial image
+    os.system("3dcalc \
+              -a %s/%s/%s_%s_un_ic.nii \
+              -expr 'step(a-0)' \
+              -prefix %s/%s/%s_%s_un_ic_mask.nii \
+              -overwrite"
+              %(sub_proc, image, subID, image, sub_proc, image, subID, image))
+    # Manual skull-stripping
+    manualSkullStrip = input(
+      "\n\033[1m  Would you like to perform manual skull-stripping? (y/n):"
+      "\033[0m").rstrip()
+    if((manualSkullStrip == 'y') | (manualSkullStrip == 'Y')):
+      #Open afni and let the user make manual adjustments.
+      print("\n\
+            Use the 'Draw ROI' plugin. Use 0s for non-brain and 1s for brain.\n\
+            Uncheck 'Copy Dataset' and choose to edit the '..._un_ic_mask'   \n\
+            dataset directly. Then select the raw image as the underlay and  \n\
+            the [image]_un_ic_mask as the overlay. Click 'Save' every now and\n\
+            then to make sure edits are not lost.                            \n\
+            ")
+      os.system("/usr/NX/scripts/vgl/vglrun afni -no_detach %s/%s/"
+                %(sub_proc, image))
+      #Replace the previous intracranial image with one based on manual
+      #skull-stripping.
+      os.system("3dcalc \
+                -a %s/%s/%s_%s.nii \
+                -b %s/%s/%s_%s_un_ic_mask.nii \
+                -expr 'a*b' \
+                -prefix %s/%s/%s_%s_un_ic.nii \
+                -overwrite"
+                %(sub_proc, image, subID, image, sub_proc, image, subID, image,
+                sub_proc, image, subID, image))
+    #Resample mask so can be used later for fMRI
+    os.system("3dresample \
+              -master %s/fmri1/%s_fmri1.nii \
+              -prefix %s/%s/%s_%s_un_ic_mask_rs.nii \
+              -input %s/%s/%s_%s_un_ic_mask.nii"
+              %(sub_proc, subID, sub_proc, image, subID, image, sub_proc, image,
+              subID, image))
+    # Talaraich
+    print("\n    ...talairaching")
+    # Note: input dataset must be in the working directory
+    os.chdir("%s/%s" %(sub_proc, image))
+    time.sleep(1)
+    os.system("@auto_tlrc \
+              -overwrite \
+              -no_ss \
+              -ok_notice \
+              -base TT_avg152T%s+tlrc \
+              -input %s_%s_un_ic.nii" %(image[1:2], subID, image))
+    #Change back to current directory
+    os.chdir("%s" %current_dir)
+    # View results
+    print("\n\
+          Visually inspect the '_at' image for proper alignment.             \n\
+          ")
+    view_tlr = input(
+      "\033[1m  Do you wish to view the talairached image? (y/n):\033[0m"
+      ).rstrip()
+    if((view_tlr == 'y') | (view_tlr == 'Y')):
+      os.system("/usr/NX/scripts/vgl/vglrun afni -no_detach %s/%s/"
+                %(sub_proc, image))
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Process functionals
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+# Loop through functional images
+for image in func_dirs:
+  run_dir = ("%s/%s" %(sub_proc, image))
+  # Continue with image?
+  process_fmri = input("\033[1m  Process \033[91m%s\033[0m\033[1m? (y/n):"
+                       "\033[0m" %image).rstrip()
+  if ((process_fmri == 'y') | (process_fmri == 'Y')):
+    print("\n  ....processing %s time series.\n" %image)
+    # Check if file exists
+    if(os.path.isfile("%s/%s_%s.nii" %(run_dir, subID, image)) != True):
+      sys.exit(("  \033[91mERROR Functional does not exist. Program terminates."
+                "\033[91m\n"))
+    # Apply GE fieldmap
+    # Reference:
+    # https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/FUGUE/Guide#FUGUE
+    # FSL fugue needs the dwell time for EPI (echo spacing) in sec for the EPI
+    # To get this, run dcm2nii (i.e., /usr/local/mricron_lx/dcm2nii images*)
+    # The messaging notes, "Effective echo spacing: 0.6999918818ms,
+    # BandwidthPerPixelPhaseEncode: 17.00699997
+    # Running fslhd on the .nii file produces:
+    # descrip: TE=38;sec=32607.9725;phaseDir=+;dwell=0.700
+    # Console says  0.7
+    # EffectiveEchoSpacing = 1/(BandwidthPerPixelPhaseEncode*MatrixSizePhase)
+    #                      = 1/(17.00699997 * 84)
+    #                      = 0.00069999188
+    print("\n  ....applying GRE fieldmap\n")
+    os.system("fugue \
+              -i %s/%s/%s_%s.nii \
+              --loadfmap=%s/fieldmap/%s_fieldmap.nii \
+              --dwell=0.00069999188 \
+              --unwarpdir=y \
+              -u %s/%s/%s_%s_b0_ge.nii" \
+              %(sub_proc, image, subID, image, sub_proc, subID, sub_proc, image,
+              subID, image))
+    # Apply SE (TOPUP) fieldmap
+    # Reference:
+    # fsl.fmrib.ox.ac.uk/fsl/fslwiki/topup/ApplyTopupUsersGuide
+    # fsl.fmrib.ox.ac.uk/fsl/fslwiki/topup/ExampleTopupFollowedByApplytopup
+    print("\n  ....applying SE fieldmap\n")
+    # FSL topup needs the total readout time for EPI (echo spacing) in sec
+    # Total readout time = (MatrixSizePhase - 1) * EffectiveEchoSpacing
+    #                    = (84 - 1) *  0.00069999188
+    #                    = 0.05809932604
+    # BOLD collected in AP and ortientation is AP, so direction is positive
+    os.system("echo \"0 1 0 0.05809932604\" >> %s/%s/datain.txt"
+              %(sub_proc, image))
+    os.system("applytopup \
+              --imain=%s/%s/%s_%s.nii \
+              --datain=%s/%s/datain.txt \
+              --inindex=1 \
+              --topup=%s/topup/%s_se_ap_pa_topup \
+              --method=jac \
+              --out=%s/%s/%s_%s_b0_se.nii"
+              %(sub_proc, image, subID, image, sub_proc, image, sub_proc, subID,
+              sub_proc, image, subID, image))
+    # Despike before co-registration (some debate about this, but afni concludes
+    # that it is better to despike first).
+    # Reference:
+    # https://afni.nimh.nih.gov/pub/dist/doc/program_help/3dDespike.html
+    print("\n  ....despiking\n")
+    os.system("3dDespike \
+              -overwrite \
+              -ignore 3 \
+              -prefix %s/%s_%s_b0_despike.nii \
+              %s/%s_%s_b0_%s.nii"
+              %(run_dir, subID, image, run_dir, subID, image, fieldmap_type))
+    print("\n\
+    View a movie of the images to select a base registration image from the  \n\
+    functional time series.                                                  \n\
+    ")
+    view_despiked = input("\033[1m  View the non-registered time series for "
+                          "movement? (y/n):\033[0m").rstrip()
+    if ((view_despiked == 'y') | (view_despiked == 'Y')):
+      os.system("/usr/NX/scripts/vgl/vglrun afni -no_detach %s" %(run_dir))
+    reg_base = input("\033[1m  Which registraton base image should be used?:"
+                     "\033[0m").rstrip()
+    # Coregister and align. Co-registration is done before alignment with the
+    # anatomical. The default cost function, the Local Pearson Correlation
+    # (LPC), is used. The LPC uses negative Pearson correlations to drive the
+    # alignment. LPC emphasizes the overlap between the bright ventricles in the
+    # EPI with the dark ventricles in T1 images. This usually achieves a good
+    # overlay of ventricles but occasionally misaligns frontal cortex. The
+    # program provides you an opportunity to view the alignment. If you are not
+    # satisfied with the fit, you may use a different cost function. We
+    # recommend "LPA" next then "nmi". You may continue with different cost
+    # functions as long as you wish. Previous alignments are kept in Session in
+    # a Cost subdirectory. But after trying a couple we recommend using "edge"
+    # then choosing the best visual fit.
+    print("\n\
+    Coregister the functional EPI time series and align it to the anatomical.\n\
+    ")
+    # Copy the anatomical to the functional run directory and convert to AFNI
+    # format so that AddEdge can combine it with the aligned functional image.
+    os.system("3dcopy \
+              -overwrite \
+              %s/t1/%s_t1_un_ic.nii \
+              %s/%s_t1_un_ic+orig"
+              %(sub_proc, subID, run_dir, subID))
+    # Copy functional to AFNI format, which appears necessary for align_epi_anat
+    os.system("3dcopy \
+              -overwrite \
+              %s/%s_%s_b0_despike.nii \
+              %s/%s_%s_b0_despike+orig "
+              %(run_dir, subID, image, run_dir, subID, image))
+    # Loop until the user is happy with adequacy of the alignment.
+    aligned = "n"
+    cost_func = "LPC"
+    while ((aligned == 'n') | (aligned == 'N')):
+      # Change to run directory (align_epi_anat.py needs to be in same directory
+      # as anatomical used for alignment)
+      os.chdir("%s" %run_dir)
+      # A default, chosen here, is to use volreg to coregister the functional
+      # volumes with the base image before calculating the alignment of the
+      # functional volumes with the anatomical. align_epi_anat.py incorporates
+      # multiple transformations into one resampling step reducing smoothing
+      # do to resampling, although some spatial smoothing occurs. Apparently
+      # align_epi_anat.py uses cubic interpolation when resampling images. The
+      # co-registration step seems to allow the user to specify either
+      # 3dvolreg, 3dWarpDrive, or 3dAllineate. 3dvolreg seems to be the
+      # default, but this is not explicitly stated in the help documents. The
+      # alignment, on the other hand, seems to always use the 3dAllineate
+      # funciton.
+      os.system("align_epi_anat.py \
+                -deoblique on \
+                -overwrite \
+                -volreg_method 3dvolreg \
+                -anat_has_skull no \
+                -tshift on \
+                -AddEdge \
+                -epi2anat \
+                -big_move \
+                -cost %s \
+                -anat %s/%s/%s_t1_un_ic+orig. \
+                -epi %s/%s_%s_b0_despike+orig. \
+                -epi_base %s \
+                -volreg_opts '-maxdisp1D %s/%s_%s_b0_despikemo_distance'"
+                %(cost_func, sub_proc, image, subID, run_dir, subID, image,
+                reg_base, run_dir, subID, image))
+      # View the registration to judge its adequacy. This process uses AFNI's
+      # @AddEdge routine to view overlays of the anatomical and the base
+      # functional image using edge detection. The AddEdge routine creates
+      # several types of composite images. Those ending in ec is the edge
+      # composite image of a volume with its own edges. Volumes ending in e3
+      # only display edges. Volumes following the naming convention of
+      # base_dset_dset_nn_ec are a composite of the base volume (dset) to
+      # which another image (dset_nn) is aligned.  Several volumes might be
+      # aligned with the base image, hence the nn designation to represent the
+      # number of subsequent volumes (eg, dset1, dset2). Because we aligned
+      # the functional volume to the anatomical image using the -epi2anat
+      # option. In the composite images the edges are color coded.  The AFNI
+      # documentation seems inconsistent with the color coding that comes up.
+      # When the functional (EPI) is aligned with the anatomy, as is our
+      # typical case, cyan (light blue) in the composite image defines the
+      # edges from of the anatomical image, the light purple are the edges of
+      # the functional (EPI) and the dark purple shows the overlapping edges
+      # (not terribly obvious). Non-edge areas (most of the volume) are shown
+      # in a monochromatic amber color scale in the overlay layer of the AFNI
+      # image window.  The underlay as the image comes up is the functional
+      # (EPI) with edges. Some of the AFNI documentation describes this
+      # arrangement differently.  There is composite where the functional is
+      # aligned and one where it is not aligned. The composite with the
+      # unaligned functional appears when the AFNI viewer comes up. When you
+      # exit the AFNI viewer you are suppose to be able to toggle between the
+      # unaligned and aligned composite. This does not work as of 08/13/15.
+      # To exit @AddEdge after exiting the AFNI view type q and press enter.
+      # I found all of the images that @AddEdge creates to be informative. Yet
+      # for a quick look I would select the anatomical image with edges (e.g.,
+      # P00001_t1_ic_ns_ec) as the overlay and the aligned composite as the
+      # underlay. The aligned composite should include al (for aligned) in its
+      # name (e.g., P00001_t1_ic_ns_P00001_fmri1_b0_despike_al_rs_ec). You
+      # might wish to compare this overlay composite with the unaligned
+      # composite by switching overlays or by using the New button in the AFNI
+      # view to bring up the  unaligned volume (but note the color scheme is
+      # different).
+      time.sleep(1)
+      print("\n\
+      Inspect the alignment. After exiting AFNI type lower case 'q' then     \n\
+      ENTER.                                                                 \n\
+      ")
+      os.chdir("%s/AddEdge" %run_dir)
+      os.system("/usr/NX/scripts/vgl/vglrun @AddEdge -auto")
+      os.chdir("%s" %run_dir)
+      os.system("/usr/NX/scripts/vgl/vglrun %s/AddEdge -auto" %run_dir)
+      print("\n\
+      Is the algnment adequate? (y/n)?. If you choose 'n' the previous       \n\
+      alignment will be deleted and you will be prompted to try a new cost   \n\
+      fuction and retry the alignment.                                       \n\
+      ")
+      align_okay = input("\033[1m  Is the alignment adequate? (y/n):\033[0m"
+                         ).rstrip()
+      if ((align_okay == 'y') | (align_okay == 'Y')):
+        aligned = "y"
+        print("\n    Alignment succeeded")
+      else:
+        print("\nPrevious alignment files deleted.\n")
+        os.system("rm -r %s/AddEdge" %run_dir)
+        os.system("rm %s/*al*" %run_dir)
+        cost_func = input("\033[1m  Enter a new cost function (e.g., LPA, "
+                          "nmi, or mi):\033[0m").rstrip()
+    os.chdir("%s" %current_dir)
+    #Convert AFNI back to NIFTI, and then remove AFNI file.
+    os.system("3dAFNItoNIFTI \
+              -prefix %s/%s_%s_b0_despike_al.nii \
+              %s/%s_%s_b0_despike_al+orig. \
+              "
+              %(run_dir, subID, image, run_dir, subID, image))
+    os.system("rm %s/*_b0_despike_al+orig.HEAD %s/*_b0_despike_al+orig.BRIK"
+              %(run_dir, run_dir))
+    # Create outlier and censor files. Calculates the Spearmen correlation of
+    # each volume with the median volume. The median volume is composed of
+    # voxels with the median image intensity for the time series of that
+    # voxel.
+    print("\n\
+    Create %s outlier file using 3dTqual and view median +/- 3.5*MAD value   \n\
+    to determine the censor threshold. Wait for plot to open...              \n\
+    " %(image))
+    os.system("2>%s/MedianRange.txt \
+              3dTqual \
+              -automask \
+              -range %s/%s_%s_b0_despike_al.nii > %s/%s_%s_outlier.txt"
+              %(run_dir, run_dir, subID, image, run_dir, subID, image))
+    os.system("cat %s/MedianRange.txt" %run_dir)
+    # Plot on screen
+    os.system("1dplot \
+              -one \
+              -yaxis 0.0:0.05:5:5 \
+              -plabel '3dTqual Default Stat' \
+              -ylabel '1 - Spearman with Median Image' \
+              -ignore 3  \
+              %s/%s_%s_outlier.txt" %(run_dir, subID, image))
+    # Save to jpg file
+    os.system("1dplot \
+              -one \
+              -yaxis 0.0:0.05:5:5 \
+              -plabel '3dTqual Default Stat' \
+              -ylabel '1 - Spearman with Median Image' \
+              -ignore 3 \
+              -jpg %s/%s_%s_outlier  \
+              %s/%s_%s_outlier.txt"
+              %(run_dir, subID, image, run_dir, subID, image))
+    out_file = open(('%s/%s_%s_outlier.txt' %(run_dir, subID, image)), 'r')
+    outliers = out_file.read().rstrip().split('\n')
+    out_file.close()
+    print("\n    Create %s censor file.\n" %image)
+    thresh_adq = input("\033[1m  Is the 1 - Spearman threshold = %s adequate "
+                       "(max of .02 and 3.5*MAD)? (y/n):\033[0m"
+                       %(max(0.02,
+                       float(outliers[0].split("  ")[2])))).rstrip()
+    if ((thresh_adq == 'n') | (thresh_adq == 'N')):
+      censor_threshold = float(input("\033[1m  Enter new censor threshold:"
+                                    "\033[0m").rstrip())
+    else:
+      censor_threshold = max(0.02, float(outliers[0].split("  ")[2]))
+    print("\n    Censor threhold is %s." %censor_threshold)
+    cen_file = open(('%s/%s_%s_censor.txt' %(run_dir, subID, image)), 'w')
+    num_cen = 0
+    for CensorLoop in range(0,len(outliers)):
+      if float(outliers[CensorLoop].split("  ")[0]) < censor_threshold:
+        cen_file.write("1\n")
+      else:
+        cen_file.write("0\n")
+        num_cen += 1
+    cen_file.close()
+    per_cen = round(100*(num_cen/float(len(outliers))), 3)
+    per_cen = "%.3f" % per_cen
+    print("    %s out of %s (%s%%) bricks censored." %(num_cen, len(outliers),
+          per_cen))
+    # Blur data. There are two options for doing this. First, you can use
+    # 3dmerge with the blur option. This imposes a set amount of blur in all
+    # directions of the image. AFNI seems to be opposed to this method. The
+    # other option is to use 3dBlurToFWHM. This function imposes blur up until
+    # the desired blur is reached. This function should be run with the
+    # detrend option with removes the blur due to intrinsic spatial structure.
+    # Note that there are also two ways of estimating blur. You can estimate
+    # blur from the image (after blur has been imposed) using the detrend
+    # option, or based on the residual statistical maps. These seem to give
+    # similar results.
+    print("\n    ...bluring %s time series data\n" %image)
+    os.system("3dBlurToFWHM \
+              -automask \
+              -detrend \
+              -FWHM 5 \
+              -input %s/%s_%s_b0_despike_al.nii \
+              -prefix %s/%s_%s_b0_despike_al_smth.nii"
+              %(run_dir, subID, image, run_dir, subID, image))
+    # Estimate actual spatial smoothness of data
+    os.system("3dFWHMx \
+              -automask \
+              -detrend \
+              -acf %s/%s_%s_acf \
+              -input %s/%s_%s_b0_despike_al_smth.nii \
+              -out %s/%s_%s_estSmooth.txt > %s/%s_%s_mean_estSmooth.txt"
+              %(run_dir, subID, image, run_dir, subID, image, run_dir, subID,
+              image, run_dir, subID, image))
+    print("\n    Processing complete for %s.\n" %image)
+
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+# Process DTIs
+#+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+#Loop through DTI images
+for image in dti_dirs:
+  run_dir = ("%s/%s" %(sub_proc, image))
+  #Continue with image?
+  process_dti = input(
+    "\033[1m  Process \033[91m%s\033[0m\033[1m? (y/n):\033[0m" %image).rstrip()
+  if ((process_dti == 'y') | (process_dti == 'Y')):
+    print("\n  ....processing %s.\n" %image)
+    # Create mean image
+    os.system("fslmaths \
+              %s/%s/%s_dwi_ap_pa_unwarped \
+              -Tmean %s/%s/%s_dwi_ap_pa_unwarped_mean"
+              %(sub_proc, image, subID, sub_proc, image, subID))
+    # Brain extract mean image
+    os.system("bet \
+              %s/%s/%s_dwi_ap_pa_unwarped_mean \
+              %s/%s/%s_dwi_ap_pa_unwarped_mean_ic \
+              -m \
+              -f 0.2"
+              %(sub_proc, image, subID, sub_proc, image, subID))
+    #Create index file
+    nv = int(os.popen('3dinfo -nv %s/%s/%s_dti_ap.nii' %(sub_proc, image, subID)).read().strip())
+    index_file = open(('%s/%s/index.txt' %(sub_proc, image)), 'w')
+    for i in range(1, nv+1):
+      index_file.write("1 ")
+    index_file.close()
+    # Appy eddy
+    os.system("eddy \
+              --imain=%s/%s/%s_dti_ap.nii \
+              --mask=%s/%s/%s_dwi_ap_pa_unwarped_mean_ic_mask \
+              --index=%s/%s/index.txt \
+              --acqp=%s/%s/datain.txt \
+              --bvecs=%s/%s/%s_dti_ap.bvec \
+              --bvals=%s/%s/%s_dti_ap.bval \
+              --fwhm=0 \
+              --topup=%s/%s/%s_dwi_ap_pa_topup \
+              --flm=quadratic \
+              --out=%s/%s/%s_dti_ap_eddy.nii"
+              %(sub_proc, image, subID, sub_proc, image, subID, sub_proc, image,
+              sub_proc, image, sub_proc, image, subID, sub_proc, image, subID,
+              sub_proc, image, subID, sub_proc, image, subID))
+    # Tensor estimation
+    os.system("dtifit \
+              --data=%s/%s/%s_dti_ap_eddy.nii \
+              --mask=%s/%s/%s_dwi_ap_pa_unwarped_mean_ic \
+              --bvecs=%s/%s/%s_dti_ap.bvec \
+              --bvals=%s/%s/%s_dti_ap.bval \
+              --out=%s/%s/%s_dti64ap"
+              %(sub_proc, image, subID, sub_proc, image, subID, sub_proc, image, subID,
+              sub_proc, image, subID, sub_proc, image, subID))
+    # Note: Next steps should use tbss in a new script.
+    # see https://fsl.fmrib.ox.ac.uk/fsl/fslwiki/TBSS#Referencing
+
+# End of script
+print("\033[1m  Script Finished\n\033[0m")
