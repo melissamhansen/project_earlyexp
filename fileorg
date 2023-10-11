@@ -1,0 +1,85 @@
+#! /usr/bin/env python3
+
+import os
+
+################################################################################
+#
+#  This script:
+#
+#    1. Compresses image directories from fMRI Center.
+#    2. Moves contents of direcotories to appropriate directories of raw.
+#    3. Deletes the empty subid directory.
+#
+################################################################################
+
+# Define project data directory
+proj_dir = "/data/earlyexp/data"
+
+# Define relevant image directories
+sub_dirs_raw = ["localizer", "t1", "fieldmap_mag", "fieldmap_phase",
+                "fmri_flanker", "fmri_rest", "se_pa", "se_ap", "dti_ap",
+                "dti_pa"]
+
+# Prompt user for subject ID
+subID=input("\n\033[1m  Participant's ID (e.g., MR0001):\033[0m").rstrip()
+
+# Define paths to tar and raw
+sub_tar = "%s/%s/tar" % (proj_dir, subID)
+sub_raw = "%s/%s/raw" % (proj_dir, subID)
+
+#Move check
+move_check = input("\033[1m  Have you moved the \033[94m%s.tar.gz\033[0m\033[1m"
+                   " file to tar? (y/n):\033[0m" %(subID)).rstrip()
+if ((move_check == 'n') | (move_check == 'N')):
+  print("\n\
+        \033[1m  Please move image directories to a top level directory named\n\
+        \033[94m%s\033[0m\033[1m and then run script again.\033[0m           \n\
+        " %(subID))
+  exit()
+
+# Untar files
+ok_untar = input("\033[1m  Okay to untar the data? (y/n):\033[0m").rstrip()
+if((ok_untar == 'y') | (ok_untar == 'Y')):
+  print("\n    ...subject's tar directory is %s" % sub_tar)
+  print("    ...untarring files. Be patient. This might take a while.\n")
+  os.system("tar -C %s -zxf %s/%s.tar.gz" %(sub_tar, sub_tar, subID))
+
+# Move contents of directories
+print("    Subject's raw directory is %s." % sub_raw)
+print("    You will now be prompted to move files from tar to raw.\n")
+for image in sub_dirs_raw:
+  ok = "n"
+  protocol_id = "1"
+  while ((ok == "n") & (protocol_id != "0")):
+    os.system("ls -rt %s/%s" %(sub_tar, subID))
+    protocol_id = input("\033[1m  Name of \033[91m%s\033[0m\033[1m scan "
+                        "directory (if missing enter 'NA'):"
+                        "\033[0m" % image).rstrip()
+    ok = input("\033[1m  Is \033[91m%s\033[0m\033[1m the correct directory name"
+               " for the \033[94m%s\033[0m\033[1m scan? (y/n):\033[0m"
+               %(protocol_id, image)).rstrip()
+    if ((ok == 'y') | (ok == 'Y')):
+      if(protocol_id != 'NA'):
+        print("\n    ...moving %s to %s/%s\n" % (protocol_id, sub_raw, image))
+        os.system("mv %s/%s/%s/* %s/%s" % (sub_tar, subID, protocol_id, sub_raw,
+                  image)) #Moves the contents of the directory to $image.
+        os.system("mv %s/%s/%s %s/%s" % (sub_tar, subID, protocol_id, sub_raw,
+                  image)) #Moves the directory to the same directory as images.
+
+# Move readme and remove extra files
+os.system("mv %s/%s/readme.txt %s" %(sub_tar, subID, sub_tar))
+print("    Files left in %s:" % subID)
+os.system("ls %s/%s" %(sub_tar, subID))
+print("    Size of tar.gz file is (should be ~1.5G):")
+os.system("du -h %s/%s.tar.gz" %(sub_tar, subID))
+delete = input("\033[1m  Okay to delete \033[94m%s\033[0m\033[1m directory? "
+               "(y/n):\033[0m" % (subID)).rstrip()
+if ((delete == 'y') | (delete == 'Y')):
+  if os.path.exists("%s/%s.tar.gz" %(sub_tar, subID)):
+    os.system("rm -r %s/%s" %(sub_tar, subID))
+  else:
+    print("\033[1m  Please ensure that tar.gz file exists prior to deleting "
+          "image directory.\033[0m")
+
+# End of script
+print("\033[1m  Script Finished\n\033[0m")
