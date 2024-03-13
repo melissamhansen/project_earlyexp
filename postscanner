@@ -1,0 +1,12 @@
+#problem solving
+#dicom converter to nifti
+
+'''
+ptyhon
+import dicom2nifti
+input_directory = "/Volumes/MerzLab/MRI_Study_of_Inhibitory_Control/Data/MRI_data/subID/flanker_copy"
+output_directory = "/Volumes/MerzLab/MRI_Study_of_Inhibitory_Control/Data/MRI_data/subID/flanker_copy"
+
+dicom2nifti.convert_directory(input_directory, output_directory)
+'''
+
