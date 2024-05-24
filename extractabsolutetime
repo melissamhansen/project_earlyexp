@@ -1,0 +1,57 @@
+import subprocess
+import pandas as pd
+import os
+
+def get_absolute_time(log_file_path):
+    """
+  get the absolute time of the log file using the 'stat' command.
+    """
+    command = f'stat -f "%SB" "{log_file_path}"'
+    result = subprocess.run(command, shell=True, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Error executing command: {result.stderr}")
+    return result.stdout.strip()
+
+def extract_subject_name(log_file_path):
+    """
+    extract the subject name from the log file path.
+    """
+    # Assuming the subject name is the first part of the log file name
+    base_name = os.path.basename(log_file_path)
+    subject_name = base_name.split('_')[0]
+    return subject_name
+
+def create_csv_from_log(log_file_path, output_csv_path, subject_name):
+    """
+    extract task PsychoPy data from the log file, add subject name, and save it as a CSV.
+    """
+    data = pd.read_csv(log_file_path, sep='\t')  # Adjust sep as necessary
+    data['Subject'] = subject_name
+    data.to_csv(output_csv_path, index=False)
+
+def process_log_files_in_directory(directory_path):
+    """
+    process all .log files in the specified directory.
+    """
+    for filename in os.listdir(directory_path):
+        if filename.endswith(".log"):
+            log_file_path = os.path.join(directory_path, filename)
+            output_csv_path = os.path.splitext(log_file_path)[0] + "abstime.csv"
+            
+            subject_name = extract_subject_name(log_file_path)
+            
+            try:
+                absolute_time = get_absolute_time(log_file_path)
+                print(f"Absolute time of the log file '{filename}': {absolute_time}")
+                create_csv_from_log(log_file_path, output_csv_path, subject_name)
+                print(f"Task PsychoPy data saved to: {output_csv_path}")
+            except Exception as e:
+                print(f"Error processing file '{filename}': {e}")
+
+if __name__ == "__main__":
+    directory_path = "/path/Data/behavioral_data/inscanner"
+    
+    if os.path.exists(directory_path):
+        process_log_files_in_directory(directory_path)
+    else:
+        print(f"Directory does not exist: {directory_path}")
