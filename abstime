@@ -1,0 +1,12 @@
+#!/bin/bash
+
+DIRECTORY="/Volumes/MerzLab/MRI_Study_of_Inhibitory_Control/Data/MRI_behavioral_data/timing_solution/CSVs"
+
+find "$DIRECTORY" -type f -exec sh -c '
+  for file do
+    # Extract the creation date and time using stat
+    creation_time=$(stat -f "%SB" -t "%Y-%m-%d %H:%M:%S" "$file")
+    # Print the file name and creation time
+    echo "$file: $creation_time"
+  done
+' sh {} +
