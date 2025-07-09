@@ -2,7 +2,7 @@ import os
 import pandas as pd
 from functools import reduce
 
-base_dir = "/Volumes/MerzLab/MRI_Study_of_Inhibitory_Control/Data/MRI_data/Freesurfer_data"
+base_dir = "/Volumes/MerzLab/MRI_Study_of_Inhibitory_Control/Data/MRI_data/Freesurfer_data/subjects"
 
 dkt_files = [
     "lh.aparc.a2009s.stats",
@@ -30,7 +30,7 @@ def parse_aparc_stats(file_path, file_label, participant_id):
             sep=r"\s+",
             skiprows=table_start,
             names=[
-                "StructName", "NumVert", "SurfArea", "GrayVol", "ThickAvg",
+              "StructName", "NumVert", "SurfArea", "GrayVol", "ThickAvg",
                 "ThickStd", "MeanCurv", "GausCurv", "FoldInd", "CurvInd"
             ],
             engine="python"

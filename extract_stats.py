@@ -4,7 +4,7 @@ import re
 from functools import reduce
 
 # directory
-base_dir = "/Volumes/MerzLab/MRI_Study_of_Inhibitory_Control/Data/MRI_data/Freesurfer_data"
+base_dir = "/Volumes/MerzLab/MRI_Study_of_Inhibitory_Control/Data/MRI_data/Freesurfer_data/subjects"
 
 # stats files
 stat_files = [
@@ -94,7 +94,7 @@ for participant in participants:
 # merge all participant data into a single wide-format dataframe
 if all_dfs:
     final_df = pd.concat(all_dfs, ignore_index=True)
-    output_path = "/Volumes/MerzLab/MRI_Study_of_Inhibitory_Control/Data/MRI_data/Freesurfer_data/subregions.csv"
+    output_path = "/Volumes/MerzLab/MRI_Study_of_Inhibitory_Control/Data/MRI_data/Freesurfer_data/wholebrain_subregions.csv"
     final_df.to_csv(output_path, index=False)
     print(f"✅ Done! Data saved to {output_path}")
 else:
