@@ -1,0 +1,61 @@
+```{r}
+# Remove outliers from data using IQR method and count outliers
+remove_outliers_iqr_HCC <- function(data) {
+  "
+  Remove outliers from data$HCC_all using IQR method
+  Returns cleaned data and number of outliers removed
+  "
+  
+  # Calculate IQR statistics
+  Q1 <- quantile(data$HCC_all, 0.25, na.rm = TRUE)
+  Q3 <- quantile(data$HCC_all, 0.75, na.rm = TRUE)
+  IQR_val <- Q3 - Q1
+  
+  # Define outlier bounds
+  lower_bound <- Q1 - 1.5 * IQR_val
+  upper_bound <- Q3 + 1.5 * IQR_val
+  
+  # Identify outliers (handle NA values properly)
+  outliers <- ifelse(is.na(data$HCC_all), FALSE, data$HCC_all < lower_bound | data$HCC_all > upper_bound)
+  num_outliers <- sum(outliers, na.rm = TRUE)
+  
+  # Create cleaned version (remove outliers by setting to NA)
+  data$HCC_clean <- data$HCC_all
+  data$HCC_clean[outliers] <- NA
+  
+  # Return bounds along with results
+  return(list(data = data, 
+              num_outliers = num_outliers,
+              lower_bound = lower_bound,
+              upper_bound = upper_bound,
+              Q1 = Q1,
+              Q3 = Q3,
+              IQR_val = IQR_val))
+}
+
+# Apply the function
+result <- remove_outliers_iqr_HCC(data)
+data <- result$data
+num_outliers <- result$num_outliers
+
+# Display results using the bounds from the result object
+cat("Number of outliers in HCC variable:", num_outliers, "\n")
+cat("Original HCC range:", range(data$HCC_all, na.rm = TRUE), "\n")
+cat("Cleaned HCC_clean range:", range(data$HCC_clean, na.rm = TRUE), "\n")
+cat("Percentage of outliers:", round(num_outliers/length(na.omit(data$HCC_all))*100, 2), "%\n")
+
+# Show summary statistics
+cat("\nSummary statistics:\n")
+cat("Original HCC:\n")
+print(summary(data$HCC_all))
+cat("\nCleaned HCC_clean:\n")
+print(summary(data$HCC_clean))
+
+# Show the outlier bounds (using values returned from function)
+cat("\nOutlier bounds:\n")
+cat("Lower bound (Q1 - 1.5*IQR):", result$lower_bound, "\n")
+cat("Upper bound (Q3 + 1.5*IQR):", result$upper_bound, "\n")
+cat("Q1:", result$Q1, "\n")
+cat("Q3:", result$Q3, "\n")
+cat("IQR:", result$IQR_val, "\n")
+```
