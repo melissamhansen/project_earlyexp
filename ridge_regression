@@ -1,0 +1,131 @@
+# ---- Packages ----
+# install.packages(c("glmnet","dplyr","tibble","purrr","tidyr","ggplot2"))
+library(glmnet)
+library(dplyr)
+library(tibble)
+library(purrr)
+library(tidyr)
+library(ggplot2)
+
+# ---- Helper: fit ridge with selected covariates unpenalized ----
+fit_ridge <- function(formula, data, unpenalized = c("sex.x","ageyrs.x","pss_total.x"), model_name = "model") {
+  mm <- model.matrix(formula, data = data)[, -1, drop = FALSE]  # glmnet adds intercept
+  y  <- scale(data$HCC_clean)
+
+  unpen_cols <- colnames(mm) %in% unpenalized
+  penalty.factor <- ifelse(unpen_cols, 0, 1)
+
+  cvfit <- cv.glmnet(
+    x = mm, y = y,
+    family = "gaussian",
+    alpha = 0,                    # ridge
+    standardize = TRUE,
+    penalty.factor = penalty.factor,
+    nfolds = 10
+  )
+
+  # Tidy coefficients
+  coefs_min <- as.matrix(coef(cvfit, s = "lambda.min"))
+  coefs_1se <- as.matrix(coef(cvfit, s = "lambda.1se"))
+
+  tidy_coefs <- bind_rows(
+    tibble(term = rownames(coefs_min), estimate = as.numeric(coefs_min[,1]), s = "lambda.min"),
+    tibble(term = rownames(coefs_1se), estimate = as.numeric(coefs_1se[,1]), s = "lambda.1se")
+  ) %>%
+    mutate(model = model_name,
+           penalized = case_when(term %in% c("(Intercept)", unpenalized) ~ FALSE, TRUE ~ TRUE)) %>%
+    select(model, s, term, estimate, penalized)
+
+  # Data for custom CV plot
+  cv_df <- tibble(
+    model = model_name,
+    lambda = cvfit$lambda,
+    log_lambda = log(cvfit$lambda),
+    cvm = cvfit$cvm,
+    cvsd = cvfit$cvsd,
+    lambda_min = cvfit$lambda.min,
+    lambda_1se = cvfit$lambda.1se
+  )
+
+  list(
+    cvfit = cvfit,
+    tidy_coefs = tidy_coefs,
+    cv_df = cv_df,
+    rmse_min = sqrt(min(cvfit$cvm)),
+    rmse_1se = sqrt(cvfit$cvm[which.min(abs(cvfit$lambda - cvfit$lambda.1se))])
+  )
+}
+
+# ---- Data rows used (avoid NAs) ----
+vars_needed <- c("HCC_clean","r_HE_nat","r_SE_nat","r_ED_nat","sex.x","ageyrs.x","pss_total.x")
+d <- subset(data, complete.cases(data[, vars_needed]))
+
+# ---- Fit the three one-domain models ----
+m_HE <- fit_ridge(scale(HCC_clean) ~ r_HE_nat + sex.x + ageyrs.x + pss_total.x, data = d, model_name = "HE")
+m_SE <- fit_ridge(scale(HCC_clean) ~ r_SE_nat + sex.x + ageyrs.x + pss_total.x, data = d, model_name = "SE")
+m_ED <- fit_ridge(scale(HCC_clean) ~ r_ED_nat + sex.x + ageyrs.x + pss_total.x, data = d, model_name = "ED")
+
+# ---- Coefficient table (readable) for the three models ----
+coef_tbl_three <- bind_rows(m_HE$tidy_coefs, m_SE$tidy_coefs, m_ED$tidy_coefs) %>%
+  arrange(model, s, penalized, term)
+
+# If you mainly care about the domain predictors at lambda.1se:
+domain_terms <- c("r_HE_nat","r_SE_nat","r_ED_nat")
+coef_tbl_domains_1se <- coef_tbl_three %>%
+  filter(s == "lambda.1se", term %in% c("(Intercept)", domain_terms, "sex.x", "ageyrs.x", "pss_total.x"))
+
+print(coef_tbl_domains_1se)
+# You can also View(coef_tbl_domains_1se) in RStudio for a spreadsheet view
+
+# ---- CV curves in ONE ggplot for the three models ----
+cv_all <- bind_rows(m_HE$cv_df, m_SE$cv_df, m_ED$cv_df)
+
+ggplot(cv_all, aes(x = log_lambda, y = cvm, color = model)) +
+  geom_ribbon(aes(ymin = cvm - cvsd, ymax = cvm + cvsd, fill = model), alpha = 0.15, color = NA) +
+  geom_line(size = 1) +
+  geom_vline(data = distinct(cv_all, model, lambda_min), aes(xintercept = log(lambda_min), color = model),
+             linetype = "dashed") +
+  geom_vline(data = distinct(cv_all, model, lambda_1se), aes(xintercept = log(lambda_1se), color = model),
+             linetype = "dotted") +
+  labs(x = "log(lambda)", y = "Mean CV Error (MSE)",
+       title = "Ridge CV Curves by Domain Model",
+       subtitle = "Dashed = lambda.min; Dotted = lambda.1se") +
+  theme_minimal(base_size = 12)
+
+# ---- RMSE summary across the three models ----
+rmse_summary <- tibble(
+  model = c("HE","SE","ED"),
+  rmse_min = c(m_HE$rmse_min, m_SE$rmse_min, m_ED$rmse_min),
+  rmse_1se = c(m_HE$rmse_1se, m_SE$rmse_1se, m_ED$rmse_1se)
+)
+print(rmse_summary)
+
+# ============================================================================
+#                 JOINT MODEL: all three domains together
+# ============================================================================
+
+m_joint <- fit_ridge(
+  scale(HCC_clean) ~ r_HE_nat + r_SE_nat + r_ED_nat + sex.x + ageyrs.x + pss_total.x,
+  data = d,
+  model_name = "JOINT"
+)
+
+# Tidy coefficient table for JOINT model (lambda.1se is often preferred)
+joint_coefs_1se <- m_joint$tidy_coefs %>%
+  filter(s == "lambda.1se") %>%
+  arrange(desc(penalized), term)
+
+print(joint_coefs_1se)
+
+# Quick coefficient plot for JOINT @ lambda.1se (excl. intercept)
+joint_coefs_plot <- joint_coefs_1se %>%
+  filter(term != "(Intercept)") %>%
+  mutate(term = factor(term, levels = rev(term)))
+
+ggplot(joint_coefs_plot, aes(x = term, y = estimate, fill = penalized)) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "Ridge Coefficients (JOINT model @ lambda.1se)",
+       x = NULL, y = "Coefficient") +
+  theme_minimal(base_size = 12) +
+  guides(fill = "none")
