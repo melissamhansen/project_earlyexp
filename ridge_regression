@@ -1,5 +1,4 @@
 # ---- Packages ----
-# install.packages(c("glmnet","dplyr","tibble","purrr","tidyr","ggplot2"))
 library(glmnet)
 library(dplyr)
 library(tibble)
@@ -7,8 +6,8 @@ library(purrr)
 library(tidyr)
 library(ggplot2)
 
-# ---- Helper: fit ridge with selected covariates unpenalized ----
-fit_ridge <- function(formula, data, unpenalized = c("sex.x","ageyrs.x","pss_total.x"), model_name = "model") {
+# fit ridge with selected covariates unpenalized 
+fit_ridge <- function(formula, data, unpenalized = c("sex","ageyrs","pss_total"), model_name = "model") {
   mm <- model.matrix(formula, data = data)[, -1, drop = FALSE]  # glmnet adds intercept
   y  <- scale(data$HCC_clean)
 
@@ -24,7 +23,7 @@ fit_ridge <- function(formula, data, unpenalized = c("sex.x","ageyrs.x","pss_tot
     nfolds = 10
   )
 
-  # Tidy coefficients
+  # coefficients
   coefs_min <- as.matrix(coef(cvfit, s = "lambda.min"))
   coefs_1se <- as.matrix(coef(cvfit, s = "lambda.1se"))
 
@@ -36,7 +35,7 @@ fit_ridge <- function(formula, data, unpenalized = c("sex.x","ageyrs.x","pss_tot
            penalized = case_when(term %in% c("(Intercept)", unpenalized) ~ FALSE, TRUE ~ TRUE)) %>%
     select(model, s, term, estimate, penalized)
 
-  # Data for custom CV plot
+  # CV plot
   cv_df <- tibble(
     model = model_name,
     lambda = cvfit$lambda,
@@ -56,20 +55,19 @@ fit_ridge <- function(formula, data, unpenalized = c("sex.x","ageyrs.x","pss_tot
   )
 }
 
-# ---- Data rows used (avoid NAs) ----
+# celan NAs
 vars_needed <- c("HCC_clean","r_HE_nat","r_SE_nat","r_ED_nat","sex.x","ageyrs.x","pss_total.x")
 d <- subset(data, complete.cases(data[, vars_needed]))
 
-# ---- Fit the three one-domain models ----
+# three one-domain models 
 m_HE <- fit_ridge(scale(HCC_clean) ~ r_HE_nat + sex.x + ageyrs.x + pss_total.x, data = d, model_name = "HE")
 m_SE <- fit_ridge(scale(HCC_clean) ~ r_SE_nat + sex.x + ageyrs.x + pss_total.x, data = d, model_name = "SE")
 m_ED <- fit_ridge(scale(HCC_clean) ~ r_ED_nat + sex.x + ageyrs.x + pss_total.x, data = d, model_name = "ED")
 
-# ---- Coefficient table (readable) for the three models ----
+# coefficient table for the three models
 coef_tbl_three <- bind_rows(m_HE$tidy_coefs, m_SE$tidy_coefs, m_ED$tidy_coefs) %>%
   arrange(model, s, penalized, term)
 
-# If you mainly care about the domain predictors at lambda.1se:
 domain_terms <- c("r_HE_nat","r_SE_nat","r_ED_nat")
 coef_tbl_domains_1se <- coef_tbl_three %>%
   filter(s == "lambda.1se", term %in% c("(Intercept)", domain_terms, "sex.x", "ageyrs.x", "pss_total.x"))
@@ -77,7 +75,7 @@ coef_tbl_domains_1se <- coef_tbl_three %>%
 print(coef_tbl_domains_1se)
 # You can also View(coef_tbl_domains_1se) in RStudio for a spreadsheet view
 
-# ---- CV curves in ONE ggplot for the three models ----
+# CV curves in one plot
 cv_all <- bind_rows(m_HE$cv_df, m_SE$cv_df, m_ED$cv_df)
 
 ggplot(cv_all, aes(x = log_lambda, y = cvm, color = model)) +
@@ -92,7 +90,7 @@ ggplot(cv_all, aes(x = log_lambda, y = cvm, color = model)) +
        subtitle = "Dashed = lambda.min; Dotted = lambda.1se") +
   theme_minimal(base_size = 12)
 
-# ---- RMSE summary across the three models ----
+#  RMSE summary 
 rmse_summary <- tibble(
   model = c("HE","SE","ED"),
   rmse_min = c(m_HE$rmse_min, m_SE$rmse_min, m_ED$rmse_min),
@@ -100,24 +98,20 @@ rmse_summary <- tibble(
 )
 print(rmse_summary)
 
-# ============================================================================
-#                 JOINT MODEL: all three domains together
-# ============================================================================
-
 m_joint <- fit_ridge(
   scale(HCC_clean) ~ r_HE_nat + r_SE_nat + r_ED_nat + sex.x + ageyrs.x + pss_total.x,
   data = d,
   model_name = "JOINT"
 )
 
-# Tidy coefficient table for JOINT model (lambda.1se is often preferred)
+#  coefficient table 
 joint_coefs_1se <- m_joint$tidy_coefs %>%
   filter(s == "lambda.1se") %>%
   arrange(desc(penalized), term)
 
 print(joint_coefs_1se)
 
-# Quick coefficient plot for JOINT @ lambda.1se (excl. intercept)
+# coefficient plot 
 joint_coefs_plot <- joint_coefs_1se %>%
   filter(term != "(Intercept)") %>%
   mutate(term = factor(term, levels = rev(term)))
