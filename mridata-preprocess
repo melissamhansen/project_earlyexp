@@ -20,7 +20,6 @@ import re
 #     7. eddy corrects DWI data
 #     8. Estimates DTI maps
 #
-#  Notes:addapted from Michael Thomas (original author)
 #
 ################################################################################
 
