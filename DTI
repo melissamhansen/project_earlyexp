@@ -1,0 +1,164 @@
+#! /usr/bin/env python3
+
+import os
+import shutil
+import re
+import csv
+from pathlib import Path
+import subprocess
+import json
+import pandas as pd
+
+# base project dir
+proj_dir = "/data/mri"
+os.chdir(proj_dir)
+
+# structural + diffusion dirs
+struc_dirs = ["T1w"]
+dti_dirs = ["dwi"]
+
+# get anatomical files
+anat_files = main.get_infiles(
+    study=study,
+    task="",
+    session="01",
+    in_paths=f"{proj_dir}/anat/sub-*_ses-{{session}}_desc-preproc_T1w.nii.gz",
+    out_path="NOTAPATH"
+)
+
+# loop anat files
+for anat in anat_files:
+
+    # check sub exists
+    if list(filter(None, re.split('sub-|_ses', anat)))[0] not in sub_list:
+        continue
+
+    # extract ids
+    subID = re.search('sub-(.+?)_', anat).group(0)[4:-1]
+    ses = re.search('ses-(.+?)_', anat).group(0)[4:-1]
+    subDir = f"sub-{subID}/ses-{ses}"
+
+    print(f"\n\n\033[1mprocessing sub {subID}\033[0m")
+
+    # paths
+    sub_preproc = f"{proj_dir}/raw-preproc/fmriprep/{subDir}"
+    sub_skullstrip = f"{proj_dir}/postproc/masks/{subDir}"
+
+    # mask anatomical images
+
+    print("\n  \033[1mcreating masked anat...\033[0m\n")
+
+    for struct in struc_dirs:
+
+        # qsiprep brain mask
+        subprocess.run(
+            f"3dcalc -overwrite "
+            f"-a {proj_dir}/raw-preproc/qsiprep/sub-{subID}/anat/sub-{subID}_desc-preproc_{struct}.nii.gz "
+            f"-b {proj_dir}/raw-preproc/qsiprep/sub-{subID}/anat/sub-{subID}_desc-brain_mask.nii.gz "
+            f"-expr 'a*b' "
+            f"-prefix {sub_skullstrip}/anat/sub-{subID}_desc-preproc_{struct}-FATCAT_brain.nii.gz",
+            shell=True
+        )
+
+        # native-space mask
+        subprocess.run(
+            f"3dcalc -overwrite "
+            f"-a {sub_preproc}/anat/sub-{subID}_ses-{ses}_desc-preproc_{struct}.nii.gz "
+            f"-b {sub_preproc}/anat/sub-{subID}_ses-{ses}_desc-brain_mask.nii.gz "
+            f"-expr 'a*b' "
+            f"-prefix {sub_skullstrip}/anat/sub-{subID}_ses-{ses}_desc-preproc_{struct}_brain.nii.gz",
+            shell=True
+        )
+
+        # masked normalized-space versions
+        for this_space in spaces:
+            subprocess.run(
+                f"3dcalc -overwrite "
+                f"-a {sub_preproc}/anat/sub-{subID}_ses-{ses}_space-{this_space}_desc-preproc_{struct}.nii.gz "
+                f"-b {sub_preproc}/anat/sub-{subID}_ses-{ses}_space-{this_space}_desc-brain_mask.nii.gz "
+                f"-expr 'a*b' "
+                f"-prefix {sub_skullstrip}/anat/sub-{subID}_ses-{ses}_space-{this_space}_desc-preproc_{struct}_brain.nii.gz",
+                shell=True
+            )
+
+    # process functional images
+
+    for task in tasks:
+
+        ses_dir = Path(f"{proj_dir}/postproc/{task}/sub-{subID}/ses-{ses}")
+        regressor_dir = ses_dir / "regressors"
+        ses_dir.mkdir(parents=True, exist_ok=True)
+        regressor_dir.mkdir(parents=True, exist_ok=True)
+
+        run_text, runs, num_runs = main.get_runs(study, task)
+
+        for run in runs:
+
+            print(f"\n\n\033[1mmasking {task} func...\033[0m\n")
+
+            for this_space in spaces:
+
+                # check missing data
+                target_json = f"{sub_preproc}/func/sub-{subID}_ses-{ses}_task-{task}{run_text}{run}_space-{this_space}_desc-preproc_bold.json"
+                if not Path(target_json).exists():
+                    print(f"\n!!! missing {task} run {run} ({this_space}) — skipping\n")
+                    continue
+
+                # mask func bold
+                subprocess.run(
+                    f"3dcalc -overwrite "
+                    f"-a {sub_preproc}/func/sub-{subID}_ses-{ses}_task-{task}{run_text}{run}_space-{this_space}_desc-preproc_bold.nii "
+                    f"-b {sub_preproc}/func/sub-{subID}_ses-{ses}_task-{task}{run_text}{run}_space-{this_space}_desc-brain_mask.nii "
+                    f"-expr 'a*b' "
+                    f"-prefix {sub_skullstrip}/func/sub-{subID}_ses-{ses}_task-{task}{run_text}{run}_space-{this_space}_desc-preproc_bold_brain.nii",
+                    shell=True
+                )
+
+                # smoothing
+                if create_smth_files == 'y':
+
+                    sub_smooth_dir = f"{proj_dir}/postproc/smooths/{subDir}"
+                    os.makedirs(sub_smooth_dir, exist_ok=True)
+
+                    print(f"\n  \033[1mblur {task} ({selected_fwhm}mm, {this_space})\033[0m")
+
+                    subprocess.run(
+                        f"3dBlurToFWHM -overwrite -automask -detrend "
+                        f"-FWHM {selected_fwhm} "
+                        f"-input {sub_preproc}/func/sub-{subID}_ses-{ses}_task-{task}{run_text}{run}_space-{this_space}_desc-preproc_bold.nii "
+                        f"-prefix {sub_smooth_dir}/sub-{subID}_ses-{ses}_task-{task}{run_text}{run}_space-{this_space}_smooth{selected_fwhm}_bold.nii",
+                        shell=True
+                    )
+
+                    # move blur metrics
+                    shutil.move(f"{proj_dir}/3dFWHMx.1D",
+                                f"{sub_smooth_dir}/sub-{subID}_ses-{ses}_task-{task}{run_text}{run}_smooth{selected_fwhm}_3dFWHMx.1D")
+                    shutil.move(f"{proj_dir}/3dFWHMx.1D.png",
+                                f"{sub_smooth_dir}/sub-{subID}_ses-{ses}_task-{task}{run_text}{run}_smooth{selected_fwhm}_3dFWHMx.1D.png")
+
+                print(f"\n  \033[1mdone sub-{subID} {task} ({this_space})\033[0m")
+
+    # process dti/diffusion
+
+
+    if proc_dmri == 'y':
+
+        sub_preproc = f"{proj_dir}/raw-preproc/qsiprep/sub-{subID}/ses-{ses}"
+
+        for diffusion in dti_dirs:
+
+            print(f"\n  processing {diffusion}\n")
+
+            print("running dtifit\n")
+            subprocess.run(
+                f"dtifit "
+                f"--data={sub_preproc}/dwi/sub-{subID}_ses-{ses}_space-T1w_desc-preproc_{diffusion}.nii.gz "
+                f"--mask={sub_preproc}/dwi/sub-{subID}_ses-{ses}_space-T1w_desc-brain_mask.nii.gz "
+                f"--bvecs={sub_preproc}/dwi/sub-{subID}_ses-{ses}_space-T1w_desc-preproc_{diffusion}.bvec "
+                f"--bvals={sub_preproc}/dwi/sub-{subID}_ses-{ses}_space-T1w_desc-preproc_{diffusion}.bval "
+                f"--out={sub_preproc}/dwi/sub-{subID}_ses-{ses}_T1w_dti.nii.gz",
+                shell=True
+            )
+            print("dtifit done\n")
+
+print("\033[1mscript finished\033[0m")
